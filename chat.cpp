@@ -6,6 +6,14 @@
 #include <atomic>
 #pragma comment(lib, "ws2_32.lib")
 
+string encryptDecrypt(string toProcess, char key) {
+    string output = toProcess;
+    for (int i = 0; i < toProcess.length(); i++) {
+        output[i] = toProcess[i] ^ key; // XOR logic
+    }
+    return output;
+}
+
 using namespace std;
 
 // --- SHARED GLOBAL VARIABLES ---
@@ -20,6 +28,11 @@ void receivefunction(SOCKET activesocket){
 
         if (byteCount > 0) {
             receiveBuffer[byteCount] = '\0'; // Null-terminate to prevent garbage text
+
+            // DECRYPTION STEP
+            string encryptedData = receiveBuffer;
+            string decryptedMsg = encryptDecrypt(encryptedData, 'K'); // Must use the same key 'K'
+            
             std::cout << "\nMessage received: " << receiveBuffer << std::endl;
             std::cout << "Enter your message: "; // Re-prompt so the UI looks clean
         } 
@@ -157,19 +170,25 @@ int main(){
     thread worker(receivefunction, activeSocket);
     worker.detach();
 
-    while (isRunning) {
+while (isRunning) {
+
         char msgbuffer[200] = {0}; 
         cout << "Me: ";
         std::cin.getline(msgbuffer, 200);
         
-        string checkExit = msgbuffer;
-        if (checkExit == "exit" || checkExit == "Exit") {
+        string originalMsg = msgbuffer;
+        if (originalMsg == "exit" || originalMsg == "Exit") {
             isRunning = false;
             break;
         }
-
-        if (strlen(msgbuffer) > 0) {
-            send(activeSocket, msgbuffer, (int)strlen(msgbuffer) + 1, 0);
+        
+        if (originalMsg.length() > 0) {
+            // ENCRYPTION STEP
+            // This applies the XOR logic
+            string encryptedMsg = encryptDecrypt(originalMsg, 'K'); 
+    
+            // Send the encrypted string instead of the raw buffer
+            send(activeSocket, encryptedMsg.c_str(), (int)encryptedMsg.length() + 1, 0);
         }
     }
 
