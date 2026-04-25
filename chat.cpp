@@ -6,6 +6,8 @@
 #include <atomic>
 #pragma comment(lib, "ws2_32.lib")
 
+using namespace std;
+
 string encryptDecrypt(string toProcess, char key) {
     string output = toProcess;
     for (int i = 0; i < toProcess.length(); i++) {
@@ -13,8 +15,6 @@ string encryptDecrypt(string toProcess, char key) {
     }
     return output;
 }
-
-using namespace std;
 
 // --- SHARED GLOBAL VARIABLES ---
 SOCKET activeSocket = INVALID_SOCKET;
