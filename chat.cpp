@@ -4,9 +4,17 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <atomic>
+#include <cctype> // Required for isalnum()
+
 #pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
+
+//  SHARED GLOBAL VARIABLES 
+SOCKET activeSocket = INVALID_SOCKET;
+bool isRunning{true};
+string localUsername;
+string peerUsername = "Peer"; // Default, gets updated during handshake
 
 string encryptDecrypt(string toProcess, char key) {
     string output = toProcess;
@@ -16,40 +24,85 @@ string encryptDecrypt(string toProcess, char key) {
     return output;
 }
 
-// --- SHARED GLOBAL VARIABLES ---
-SOCKET activeSocket = INVALID_SOCKET;
-bool isRunning{true};
+//  USERNAME VALIDATION 
+bool isValidUsername(const string& uname) {
+    // Constraint 1: Length between 3 and 15 characters
+    if (uname.length() < 3 || uname.length() > 15) {
+        cout << "-> Username must be between 3 and 15 characters.\n";
+        return false;
+    }
+    // Constraint 2: Alphanumeric only (no spaces, no special characters)
+    for (char c : uname) {
+        if (!isalnum(c)) {
+            cout << "-> Username can only contain letters and numbers.\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+void displayLocalIPs() {
+    char hostName[256];
+    
+    if (gethostname(hostName, sizeof(hostName)) == SOCKET_ERROR) {
+        cout << "[System] Could not retrieve IP addresses." << endl;
+        return;
+    }
+
+    addrinfo hints = {0};
+    hints.ai_family = AF_INET;       
+    hints.ai_socktype = SOCK_STREAM; 
+
+    addrinfo* addressList = nullptr;
+
+    if (getaddrinfo(hostName, NULL, &hints, &addressList) != 0) {
+        cout << " Could not retrieve IP addresses." << endl;
+        return;
+    }
+
+    cout << " Share this IP with the client " << endl;
+
+    for (addrinfo* ptr = addressList; ptr != nullptr; ptr = ptr->ai_next) {
+        sockaddr_in* sockaddr_ipv4 = (sockaddr_in*)ptr->ai_addr;
+        char ipString[INET_ADDRSTRLEN];
+        
+        inet_ntop(AF_INET, &(sockaddr_ipv4->sin_addr), ipString, INET_ADDRSTRLEN);
+        
+
+        if (string(ipString) != "127.0.0.1") {
+            cout << " -> " << ipString << endl;
+        }
+    }
+    
+    freeaddrinfo(addressList);
+}
 
 void receivefunction(SOCKET activesocket){
     char receiveBuffer[200];
-    while (true) {
-        // This call will block, but only inside THIS thread
+    while (isRunning) {
         int byteCount = recv(activesocket, receiveBuffer, 200, 0);
 
-    if (byteCount > 0) {
+        if (byteCount > 0) {
             receiveBuffer[byteCount] = '\0'; 
             string decryptedMsg = encryptDecrypt(receiveBuffer, 'K'); 
 
             if (decryptedMsg == "exit" || decryptedMsg == "Exit") {
-                cout << "\n[System] Peer has left. Exiting..." << endl;
+                cout << "\n[System] " << peerUsername << " has left. Exiting..." << endl;
                 exit(0); 
             }
             
-            // --- CLEAN UI LOGIC ---
-            // \r moves the cursor to the start of the line to overwrite the old "Me: "
-            std::cout << "\r" << "Message received: " << decryptedMsg << std::endl;
-            // Reprint the prompt so the user knows they can still type
-            std::cout << "Me: " << std::flush; 
+            // \r overwrites the local prompt
+            cout << "\r" << peerUsername << " : " << decryptedMsg << "\n";
+            // Reprint the local prompt
+            cout << localUsername << " : " << flush; 
         }
-        
         else if (byteCount == 0) {
-            std::cout << "\nPeer disconnected." << std::endl;
+            cout << "\n[System] " << peerUsername << " disconnected." << endl;
             break; 
         } 
         else {
-            // Only print error if we didn't intentionally close the socket
             if(isRunning) {
-                std::cout << "\nReceive error: " << WSAGetLastError() << std::endl;
+                cout << "\nReceive error: " << WSAGetLastError() << endl;
             }
             break;
         }
@@ -58,12 +111,12 @@ void receivefunction(SOCKET activesocket){
 }
 
 void server(int port){
-    // Create a Socket
+    displayLocalIPs();
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (serverSocket == INVALID_SOCKET) {
         cout << "Socket creation failed!" << endl;
         WSACleanup();
-        exit(1); // Stop execution
+        exit(1);
     }
 
     sockaddr_in service;
@@ -71,97 +124,117 @@ void server(int port){
     service.sin_port = htons(port); 
     service.sin_addr.s_addr = INADDR_ANY; 
 
-    // Creating a bind
     if (bind(serverSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
         cout << "bind() failed: " << WSAGetLastError() << endl;
         closesocket(serverSocket);
         WSACleanup();
-        exit(1); // Stop execution
+        exit(1);
     }
 
-    // Put the socket in Listening mode
     if (listen(serverSocket, 1) == SOCKET_ERROR) {
         cout << "listen(): Error listening on socket " << WSAGetLastError() << endl;
         closesocket(serverSocket);
         WSACleanup();
-        exit(1); // Stop execution
+        exit(1);
     }
 
     cout << "Waiting for a connection..." << endl;
     activeSocket = accept(serverSocket, NULL, NULL);
 
     if (activeSocket == INVALID_SOCKET) {
-        std::cout << "Accept failed: " << WSAGetLastError() << std::endl;
+        cout << "Accept failed: " << WSAGetLastError() << endl;
         closesocket(serverSocket);
         WSACleanup();
-        exit(1); // Stop execution
+        exit(1);
     } 
 
-    std::cout << "Connection established." << std::endl;
-    closesocket(serverSocket); // Close the listener as we only need activeSocket now
+    cout << "Connection established." << endl;
+    closesocket(serverSocket); 
+
+    //  SERVER HANDSHAKE 
+    char nameBuf[50] = {0};
+    //  Receive client's username
+    recv(activeSocket, nameBuf, 50, 0);
+    peerUsername = encryptDecrypt(string(nameBuf), 'K');
+    //  Send our username
+    string encryptedName = encryptDecrypt(localUsername, 'K');
+    send(activeSocket, encryptedName.c_str(), encryptedName.length() + 1, 0);
 }
 
 void client(int port){
-    // Create a Socket
     activeSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (activeSocket == INVALID_SOCKET) {
-        std::cout << "Socket creation failed!" << std::endl;
+        cout << "Socket creation failed!" << endl;
         WSACleanup();
-        exit(1); // Stop execution
+        exit(1);
     }
 
-    // Get VALID IP from user
-    std::string ipInput;
+    string ipInput;
     IN_ADDR binAddr; 
     while (true) {
-        std::cout << "Enter the Target IP Address (e.g., 127.0.0.1): ";
-        std::cin >> ipInput;
+        cout << "Enter the Target IP Address (e.g., 127.0.0.1): ";
+        cin >> ipInput;
 
         if (inet_pton(AF_INET, ipInput.c_str(), &binAddr) == 1) {
-            break; // Success!
+            break; 
         }
-        std::cout << "Invalid IP format. Try again." << std::endl;
+        cout << "Invalid IP format. Try again." << endl;
     }
 
-    // Assigning address to our socket
     sockaddr_in clientService;
     clientService.sin_family = AF_INET;
     clientService.sin_port = htons(port);
     clientService.sin_addr = binAddr; 
 
-    // Connect to the Server
-    std::cout << "Connecting to " << ipInput << " on port " << port << "..." << std::endl;
+    cout << "Connecting to " << ipInput << " on port " << port << "..." << endl;
 
     if (connect(activeSocket, (SOCKADDR*)&clientService, sizeof(clientService)) == SOCKET_ERROR) {
-        std::cout << "Client: connect() failed with error: " << WSAGetLastError() << std::endl;
+        cout << "Client: connect() failed with error: " << WSAGetLastError() << endl;
         closesocket(activeSocket);
         WSACleanup();
         
-        std::cout << "Press Enter to exit...";
-        std::cin.ignore(1000, '\n');
-        std::cin.get();
-        exit(1); // Stop execution
+        cout << "Press Enter to exit...";
+        cin.ignore(1000, '\n');
+        cin.get();
+        exit(1);
     } else {
-        std::cout << "Successfully connected" << std::endl;
-        std::cin.ignore(1000, '\n');
+        cout << "Successfully connected" << endl;
+        cin.ignore(1000, '\n');
     }
+
+    //  CLIENT HANDSHAKE 
+    // Send our username
+    string encryptedName = encryptDecrypt(localUsername, 'K');
+    send(activeSocket, encryptedName.c_str(), encryptedName.length() + 1, 0);
+    // Receive server's username
+    char nameBuf[50] = {0};
+    recv(activeSocket, nameBuf, 50, 0);
+    peerUsername = encryptDecrypt(string(nameBuf), 'K');
 }
 
 int main(){
-    char username[50];
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
     int choice;
     bool validChoice = false;
 
+    //  Get and Validate Username first
+    while (true) {
+        cout << "Enter Username: ";
+        getline(cin, localUsername);
+        
+        if (isValidUsername(localUsername)) {
+            break; // Valid name, break the loop
+        }
+    }
+
+    //  Get Host/Join Choice
     while(!validChoice) {
         cout << "1. Host a Chat (Server)\n2. Join a Chat (Client)\nChoice: ";
         cin >> choice;
-        cin.ignore(); // Clear newline
-        cout << "Enter Username : ";
-        cin >> username;
-        cin.ignore();
+        cin.ignore(); // Clear newline left by cin
+        
         if (choice == 1) {
             server(5500);
             validChoice = true;
@@ -175,38 +248,37 @@ int main(){
         }
     }
 
-    cout << "[System] Connected! Type 'exit' to quit." << endl;
+    cout << "\n[System] Connected with " << peerUsername << "! Type 'exit' to quit." << endl;
     
     // Start the receiver thread
     thread worker(receivefunction, activeSocket);
     worker.detach();
 
+    // Give the receiver thread a tiny fraction of a second to print if needed, 
+    // though the UI synchronization usually handles this fine.
+    this_thread::sleep_for(chrono::milliseconds(100));
+
+    // Chat Loop
     while (isRunning) {
         char msgbuffer[200] = {0}; 
-        cout << username << " : ";
-        std::cin.getline(msgbuffer, 200);
+        cout << localUsername << " : ";
+        cin.getline(msgbuffer, 200);
         
         string originalMsg = msgbuffer;
 
-        // Skip empty messages to prevent double "Me:" prompts
         if (originalMsg.empty()) {
             continue;
         }
 
-        // 1. One encryption call
         string encryptedMsg = encryptDecrypt(originalMsg, 'K');
-
-        // 2. One send call
         send(activeSocket, encryptedMsg.c_str(), (int)encryptedMsg.length() + 1, 0);
 
-        // 3. One exit check
         if (originalMsg == "exit" || originalMsg == "Exit") {
             isRunning = false;
             break;
         }
     }
 
-    // Clean shutdown
     shutdown(activeSocket, SD_BOTH);
     closesocket(activeSocket);
     WSACleanup();
