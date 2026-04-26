@@ -148,6 +148,7 @@ void client(int port){
 }
 
 int main(){
+    char username[50];
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
@@ -158,7 +159,9 @@ int main(){
         cout << "1. Host a Chat (Server)\n2. Join a Chat (Client)\nChoice: ";
         cin >> choice;
         cin.ignore(); // Clear newline
-
+        cout << "Enter Username : ";
+        cin >> username;
+        cin.ignore();
         if (choice == 1) {
             server(5500);
             validChoice = true;
@@ -180,7 +183,7 @@ int main(){
 
     while (isRunning) {
         char msgbuffer[200] = {0}; 
-        cout << "Me: ";
+        cout << username << " : ";
         std::cin.getline(msgbuffer, 200);
         
         string originalMsg = msgbuffer;
