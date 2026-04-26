@@ -26,16 +26,22 @@ void receivefunction(SOCKET activesocket){
         // This call will block, but only inside THIS thread
         int byteCount = recv(activesocket, receiveBuffer, 200, 0);
 
-        if (byteCount > 0) {
-            receiveBuffer[byteCount] = '\0'; // Null-terminate to prevent garbage text
+    if (byteCount > 0) {
+            receiveBuffer[byteCount] = '\0'; 
+            string decryptedMsg = encryptDecrypt(receiveBuffer, 'K'); 
 
-            // DECRYPTION STEP
-            string encryptedData = receiveBuffer;
-            string decryptedMsg = encryptDecrypt(encryptedData, 'K'); // Must use the same key 'K'
+            if (decryptedMsg == "exit" || decryptedMsg == "Exit") {
+                cout << "\n[System] Peer has left. Exiting..." << endl;
+                exit(0); 
+            }
             
-            std::cout << "\nMessage received: " << receiveBuffer << std::endl;
-            std::cout << "Enter your message: "; // Re-prompt so the UI looks clean
-        } 
+            // --- CLEAN UI LOGIC ---
+            // \r moves the cursor to the start of the line to overwrite the old "Me: "
+            std::cout << "\r" << "Message received: " << decryptedMsg << std::endl;
+            // Reprint the prompt so the user knows they can still type
+            std::cout << "Me: " << std::flush; 
+        }
+        
         else if (byteCount == 0) {
             std::cout << "\nPeer disconnected." << std::endl;
             break; 
@@ -137,6 +143,7 @@ void client(int port){
         exit(1); // Stop execution
     } else {
         std::cout << "Successfully connected" << std::endl;
+        std::cin.ignore(1000, '\n');
     }
 }
 
@@ -165,33 +172,38 @@ int main(){
         }
     }
 
-    // chat logic
     cout << "[System] Connected! Type 'exit' to quit." << endl;
+    
+    // Start the receiver thread
     thread worker(receivefunction, activeSocket);
     worker.detach();
 
-while (isRunning) {
-
+    while (isRunning) {
         char msgbuffer[200] = {0}; 
         cout << "Me: ";
         std::cin.getline(msgbuffer, 200);
         
         string originalMsg = msgbuffer;
+
+        // Skip empty messages to prevent double "Me:" prompts
+        if (originalMsg.empty()) {
+            continue;
+        }
+
+        // 1. One encryption call
+        string encryptedMsg = encryptDecrypt(originalMsg, 'K');
+
+        // 2. One send call
+        send(activeSocket, encryptedMsg.c_str(), (int)encryptedMsg.length() + 1, 0);
+
+        // 3. One exit check
         if (originalMsg == "exit" || originalMsg == "Exit") {
             isRunning = false;
             break;
         }
-        
-        if (originalMsg.length() > 0) {
-            // ENCRYPTION STEP
-            // This applies the XOR logic
-            string encryptedMsg = encryptDecrypt(originalMsg, 'K'); 
-    
-            // Send the encrypted string instead of the raw buffer
-            send(activeSocket, encryptedMsg.c_str(), (int)encryptedMsg.length() + 1, 0);
-        }
     }
 
+    // Clean shutdown
     shutdown(activeSocket, SD_BOTH);
     closesocket(activeSocket);
     WSACleanup();
