@@ -41,41 +41,7 @@ bool isValidUsername(const string& uname) {
     return true;
 }
 
-void displayLocalIPs() {
-    char hostName[256];
-    
-    if (gethostname(hostName, sizeof(hostName)) == SOCKET_ERROR) {
-        cout << "[System] Could not retrieve IP addresses." << endl;
-        return;
-    }
 
-    addrinfo hints = {0};
-    hints.ai_family = AF_INET;       
-    hints.ai_socktype = SOCK_STREAM; 
-
-    addrinfo* addressList = nullptr;
-
-    if (getaddrinfo(hostName, NULL, &hints, &addressList) != 0) {
-        cout << " Could not retrieve IP addresses." << endl;
-        return;
-    }
-
-    cout << " Share this IP with the client " << endl;
-
-    for (addrinfo* ptr = addressList; ptr != nullptr; ptr = ptr->ai_next) {
-        sockaddr_in* sockaddr_ipv4 = (sockaddr_in*)ptr->ai_addr;
-        char ipString[INET_ADDRSTRLEN];
-        
-        inet_ntop(AF_INET, &(sockaddr_ipv4->sin_addr), ipString, INET_ADDRSTRLEN);
-        
-
-        if (string(ipString) != "127.0.0.1") {
-            cout << " -> " << ipString << endl;
-        }
-    }
-    
-    freeaddrinfo(addressList);
-}
 
 void receivefunction(SOCKET activesocket){
     char receiveBuffer[200];
@@ -111,7 +77,6 @@ void receivefunction(SOCKET activesocket){
 }
 
 void server(int port){
-    displayLocalIPs();
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (serverSocket == INVALID_SOCKET) {
         cout << "Socket creation failed!" << endl;
